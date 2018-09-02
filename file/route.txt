@@ -1,0 +1,398 @@
+<?php
+
+	$route = new Router(Request::uri());
+	$route->getParameter(1);
+	echo $route->getParameter(1);
+	switch($route->getParameter(1)){
+		case "reset":
+			$verify_array['resetToken'] = $route->getParameter(2);
+			$gump = new GUMP();
+			$verify_array = $gump->sanitize($verify_array);
+			$validation_rules_array = array(
+				'resetToken' => 'required'
+			);
+			$gump->validation_rules($validation_rules_array);
+			$filter_rules_array = array(
+				'resetToken' => 'trim'
+			);
+			$gump->filter_rules($filter_rules_array);
+			$validated_data = $gump->run($verify_array);
+			if ($validated_data == false){
+				header("Location: login");
+				exit;
+			}else{
+				foreach($validation_rules_array as $key => $val){
+					${$key} = $verify_array[$key];
+				}
+				$table = 'members';
+				$condition = 'resetToken = :resetToken';
+				$order_by = '1';
+				$fields = 'resetToken, resetComplete';
+				$data_array[':resetToken'] = $resetToken;
+				$result = Database::get()->query($table, $condition, $data_array, $order_by, $fields);
+				print_r($result);
+				
+				if (!isset($result[0]['resetToken']) OR empty($result[0]['resetToken'])){
+					$stop = 'Invalid token provided, please use the link provided to reset email.';
+				}else if (isset($result[0]['resetComplete']) AND $result[0]['resetComplete'] == 'Yes'){
+					$stop = 'Your password has already been changed!';
+				}
+			}
+			if (isset($_POST['submit'])){
+				$gump = new GUMP();
+				$_POST = $gump->sanitize($_POST);
+	
+				$validation_rules_array = array(
+					'password'	=> 'required|max_len,20|min_len,6',
+					'passwordConfirm' => 'required'
+				);
+				$gump->validation_rules($validation_rules_array);
+	
+				$filter_rules_array = array(
+					'password' => 'trim',
+					'passwordConfirm' => 'trim'
+				);
+				$gump->filter_rules($filter_rules_array);
+				$validated_data = $gump->run($_POST);
+	
+				if($validated_data == false){
+					$error = $gump->get_readable_errors(false);
+				}else{
+					foreach($validation_rules_array as $key => $val){
+						${$key} = $_POST[$key];
+					}
+					$userVelidator = new UserVelidator();
+					$userVelidator->isPasswordMatch($password, $passwordConfirm);
+					$error = $userVelidator->getErrorArray();
+				}
+				if (count($error) == 0){
+					$passwordObject = new Password();
+					$hashedpassword = $passwordObject->password_hash($password, PASSWORD_BCRYPT);
+					try{
+						$data_array = array();
+						$table = 'members';
+						$data_array['password'] = $password;
+						$data_array['resetComplete'] = 'Yes';
+						$key = "resetToken";
+						$id = $resetToken;
+						Database::get()->update($table, $data_array, $key, $id);
+	
+						header('Location: ../login?action=resetAccount');
+						exit;
+					}catch(PDOException $e){
+						$error[] = $e->getMessage();
+					}
+				}
+			}
+			include 'view/header.php';
+			include 'view/reset.php';
+			include 'view/footer.php';
+			break;
+		case "forget":
+			if (UserVelidator::isLogin(isset($_SESSION['username'])?$_SESSION['username']:'')){
+				header('Location: home');
+				exit();
+			}
+
+			if (isset($_POST['submit'])){
+				$gump = new GUMP();
+				$_POST = $gump->sanitize($_POST);
+				$validation_rules_array = array(
+					'email' => 'required|valid_email'
+				);
+				$gump->validation_rules($validation_rules_array);
+				$filter_rules_array = array(
+					'email' => 'trim|sanitize_email'
+				);
+				$gump->filter_rules($filter_rules_array);
+				$validated_data = $gump->run($_POST);
+
+				if ($validated_data == false){
+					$error = $gump->get_readable_errors(false);
+				}else{
+					foreach($validation_rules_array as $key => $val){
+						${$key} = $_POST[$key];
+					}
+				}
+				$table = 'members';
+				$condition = 'email = :email';
+				$order_by = '1';
+				$fields = 'email, id';
+				$data_array[':email'] = $email;
+				$result = Database::get()->query($table, $condition, $data_array, $order_by, $fields);
+				if (!isset($result[0]['id']) OR empty($result[0]['id'])){
+					$error[] = 'Email provided is not recongnized.';
+				}else{
+					$id = $result[0]['id'];
+				}
+				if (!isset($error)){
+					try{
+						$data_array = array();
+						$data_array['resetComplete'] = 'No';
+						$data_array['resetToken'] = md5(rand().time());
+						$resetToken = $data_array['resetToken'];
+						$key = 'id';
+						$id = $id;
+						Database::get()->update('members', $data_array, $key, $id);
+
+						$to = $email;
+						$subject = "Password Reset";
+						$body = "<p>Someone requested that tho password be reset.</p><p>If this was a mistake, just ignore this email nad nothing will happen.</p><p>To reset your password, visit the following address:<a href='http://192.168.137.234/reset/$resetToken'>reset/$resetToken</a></p>";
+
+						$mail = new Mail(Config::MAIL_USER_NAME, Config::MAIL_USER_PASSWORD);
+						$mail->setFrom(Config::MAIL_FROM, Config::MAIL_FROM_NAME);
+						$mail->addAddress($to);
+						$mail->subject($subject);
+						$mail->body($body);
+						$mail->send();
+
+						header('Location: login?action=reset');
+						exit;
+					}catch(PDOException $e){
+						$error[] = $e->getMessage();
+					}
+				}
+			}
+			$title = 'Reset Account';
+			include 'view/header.php';
+			include 'view/forget.php';
+			include 'view/footer.php';
+			break;
+		case "logout":
+			unset($_SESSION['id']);
+			unset($_SESSION['username']);
+			header('location: login');
+			break;
+		case "home":
+			if (UserVelidator::isLogin(isset($_SESSION['username'])?$_SESSION['username']:'')){
+				include('view/header.php');
+				include('view/home.php');
+				include('view/footer.php');
+			}else{
+				header('Location: logout');
+			}
+			break;
+		case 'login':
+			if (isset($_POST['submit'])){
+				$gump = new GUMP();
+				$_POST = $gump->sanitize($_POST);
+				$validation_rules_array = array(
+					'username' => 'required|alpha_numeric|max_len,20|min_len,3',
+					'password' => 'required|max_len,20,|min_len,3'
+				);
+				$gump->validation_rules($validation_rules_array);
+				$filter_rules_array = array(
+					'username' => 'trim|sanitize_string',
+					'password' => 'trim',
+				);
+				$gump->filter_rules($filter_rules_array);
+				$validated_data = $gump->run($_POST);
+
+				if ($validated_data == false){
+					$error = $gump->get_readable_errors(false);
+				}else{
+					foreach($validation_rules_array as $key => $val){
+						${$key} = $_POST[$key];
+					}
+					$userVelidator = new UserVelidator();
+					$userVelidator->loginVerification($username, $password);
+					$error = $userVelidator->getErrorArray();
+					if(count($error) == 0){
+						$condition = "username = :username";
+						$data_array = array(":username" => $username);
+						$result = Database::get()->query("members", $condition, $data_array);
+						$_SESSION['id'] = $result[0]['id'];
+						$_SESSION['username'] = $username;
+						header('Location: home');
+					}
+				}
+			}
+			include('view/header.php');
+			include('view/login.php');
+			include('view/footer.php');
+			break;
+		case "do_create":
+			
+			$data_array['hero_name'] = "Van";
+			$data_array['hero_hp'] = 111;
+			$data_array['hero_mp'] = 222;
+
+			$data = GUMP::xss_clean($_POST);
+			$is_valid = GUMP::is_valid($data, array(
+				'hero_name' => 'required',
+				'hero_description' => 'required|max_len,100|min_len,6'
+			));
+			
+			if ($is_valid === true){
+				$table = "hero";
+				$data_array['hero_name'] = $data['hero_name'];
+				Database::get()->insert($table, $data_array);
+				header("Location: "."success");
+			}else{
+				print_r($is_valid);
+				die;
+			}
+			
+			exit;
+			break;
+		case "create":
+			include 'view/header.php';
+			include 'view/create.php';
+			include 'view/footer.php';
+			break;
+		case "do_mail":
+			try {
+				$to = "qazqwe345@yahoo.com.tw";
+				$subject = "sample subject";
+				$body = "sample content";
+				$mail = new Mail(Config::MAIL_USER_NAME, Config::MAIL_USER_PASSWORD);
+				$mail->setFrom(Config::MAIL_FROM, Config::MAIL_FROM_NAME);
+				$mail->addAddress($to);
+				$mail->subject($subject);
+				$mail->body($body);
+				if ($mail->send()){
+					echo "success";
+				}else{
+					echo "fail";
+				}
+			} catch(Exception $e){
+				echo 'Caught exception: ', $e->getMessage();
+				$error[] = $e->getMessage();
+			}
+			break;
+		case "success":
+			include 'view/header.php';
+			include 'view/success.php';
+			include 'view/footer.php';
+			break;
+		case "register":
+			if (isset($_POST['submit'])){
+				$gump = new GUMP();
+				$_POST = $gump->sanitize($_POST);
+
+				$validation_rules_array = array(
+					'username'	=> 'required|alpha_numeric|max_len,20|min_len,8',
+					'email'		=> 'required|valid_email',
+					'password'	=> 'required|max_len,20|min_len,8',
+					'passwordConfirm' => 'required'
+				);
+				$gump->validation_rules($validation_rules_array);
+				$filter_rules_array = array(
+					'username' => 'trim|sanitize_string',
+					'email'    => 'trim|sanitize_email',
+					'password' => 'trim',
+					'passwordConfirm' => 'trim'
+				);
+				$gump->filter_rules($filter_rules_array);
+				
+				$validated_data = $gump->run($_POST);
+
+				if ($validated_data === false){
+					$error = $gump->get_readable_errors(false);
+				}else{
+					foreach($validation_rules_array as $key => $val){
+						${$key} = $_POST[$key];
+					}
+					$userVelidator = new UserVelidator();
+					$userVelidator->isPasswordMatch($password, $passwordConfirm);
+					$userVelidator->isUsernameDuplicate($username);
+					$userVelidator->isEmailDuplicate($email);
+					$error = $userVelidator->getErrorArray();
+				}
+				if(count($error) == 0){
+					$passwordObject = new Password();
+					$hashedpassword = $passwordObject->password_hash($password, PASSWORD_BCRYPT);
+					$activation = md5(uniqid(rand(),true));
+
+					try{
+						$data_array = array(
+							'username' => $username,
+							'password' => $password,
+							'email' => $email,
+							'active' => $activation
+						);
+						Database::get()->insert("members", $data_array);
+						//header('Location: '.'register');
+						$id = Database::get()->getLastId();
+						$subject = "Registration Confirmation";
+						$body = "<p>Thank you for registering at demo site.</p><p>To activate your account, please click on this link: <a href='192.168.137.173/activate/$id/$activation'>192.168.137.173/activate/$id/$activation</a></p><Regards Site Admin</p>>";
+						$mail = new Mail(Config::MAIL_USER_NAME, Config::MAIL_USER_PASSWORD);
+						$mail->setFrom(Config::MAIL_FROM, Config::MAIL_FROM_NAME);
+						$mail->addAddress($email);
+						$mail->subject($subject);
+						$mail->body($body);
+						$mail->send();
+					}catch(PDOException $e){
+						$error[] = $e->getMessage();
+					}
+				}
+			}
+			include 'view/header.php';
+			include 'view/register.php';
+
+			include 'view/footer.php';
+			break;
+		case "activate";
+			$data_array = array();
+			$data_array['id'] = $route->getParameter(2);
+			$data_array['active'] = $route->getParameter(3);
+			print_r($data_array);
+
+			$gump = new GUMP();
+			$data_array = $gump->sanitize($data_array);
+			$validation_rules_array = array(
+				'id' => 'required|integer',
+				'active' => 'required|exact_len,32'
+			);
+			$gump->validation_rules($validation_rules_array);
+			
+			$filter_rules_array = array(
+				'id' => 'trim|sanitize_string',
+				'active' => 'trim',
+			);
+			$gump->filter_rules($filter_rules_array);
+			$validated_data = $gump->run($data_array);
+			print_r($validated_data);
+
+			if ($validated_data == false){
+				exit;
+			}else{
+				foreach($validation_rules_array as $key=>$val){
+					${$key} = $data_array[$key];
+				}
+				$userVelidator = new UserVelidator();
+				if ($userVelidator->isReady2Active($id, $active)){
+					$update_array['active'] = "Yes";
+					Database::get()->update("members", $update_array, "id", $data_array['id']);
+					header('Location: login?action=active');
+					exit;
+				}else{
+					echo "Your account could not be activated.";
+					exit;
+				}
+			}
+			break;
+			
+		case "list":
+			include 'view/header.php';
+			include 'view/list.php';
+			include 'view/footer.php';
+			break;
+		case "hero":
+			include 'view/header.php';
+			include 'view/hero.php';
+			include 'footer.php';
+			break;
+		default:
+			include 'view/header.php';
+			include 'view/default.php';
+			include 'view/footer.php';
+			break;
+	}
+
+
+
+
+
+
+?>

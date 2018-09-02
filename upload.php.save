@@ -1,0 +1,11 @@
+
+<?php
+	if (isset($_FILES['file']['error']>0)){
+		echo "Upload Failed";
+	}else{
+		move_uploaded_file($_FILES['file']['tmp_name'], 'file/'.$_FILES['file']['name']);
+		echo "route:<a href='file/$_FILES['file']['name']'>'file/$_FILES['file']['name']'</a>";
+		echo "<br />";
+		echo "type: ".$_FILES['file']['type']."bytes: ".$_FILES['file']['size']."<br />";	}
+?>
+
